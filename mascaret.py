@@ -3,46 +3,75 @@ import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from numba import njit
 import time
+from matplotlib.patches import Polygon
 
-L = 2e4
-h_estuary = 6
-h_river = 3
-b_river = 500
-b_estuary = 2000
-Q_river = 800.0 
+show_river = True          #True si on veut afficher la forme de la rivière en largeur
+show_bathymetry = False     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
 
-tide_amplitude = 1
-tide_period = 12 * 3600 + 25 * 60
+L = 6e4             #Longueur caractéristique de l'écoulement
+h_estuary = 5       #Profondeur en aval (gauche)
+h_river = 3         #Profondeur en amont (droite) -> Utilisée seulement si profondeur
+b_river = 200       #Larguer de la rivière en amont
+b_estuary = 12000   #Largeur de la rivière en aval (estuaire)
+Q_river = 800.0     #Débit de la rivière en amont (pas utilisé pour l'instant)
 
-n_manning = 0.01
+tide_amplitude = 3                  #Amplitude de la marée
+tide_period = 12 * 3600 + 25 * 60   #Période de l'onde de marée -> 12h25m
 
-nx = 1024
+n_manning = 0.001       #Coefficient de frottement de manning
+
+nx = 512
 dx = L / nx
 x = np.linspace(0, L, nx)
 
 g = 9.81
-cfl = 0.1
+cfl = 0.01
 dt = cfl * dx / (np.sqrt(g * h_estuary + tide_amplitude))
-tmax = 0.1*tide_period
+c = np.sqrt(g * h_estuary)   # vitesse d'onde (approximation mascaret)
+tmax = L / c  
 t = 0.0
 
+#Création du profil de largeur de la rivière :
+b = b_river + (b_estuary - b_river) * np.exp(-8 * x / L)
 
-b = b_river + (b_estuary - b_river) * np.exp(-4 * x / L)
-zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
-#fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
-# ax1.plot(x/1000, b, 'b-', linebidth=2)
-# ax1.set_ylabel("Largeur (m)")
-# ax1.set_title("Évolution de la largeur de la Garonne (estuaire → Podensac)")
-# ax1.grid(True)
+#Création du profil de profondeur de la rivière :
+#zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
+zb = np.full(nx, -h_estuary)
 
-# ax2.plot(x/1000, zb, 'r-', linebidth=2)
-# ax2.set_ylabel("Profondeur (m)")
-# ax2.set_xlabel("Distance (km)")
-# ax2.set_title("Évolution de la profondeur")
-# ax2.grid(True)
+if show_river :
+    fig, ax = plt.subplots(figsize=(12, 4))
+    river_left = -b / 2
+    river_right = b / 2
+    river_coords = np.vstack([
+        np.column_stack((x / 1000, river_left)),
+        np.column_stack((x[::-1] / 1000, river_right[::-1]))
+    ])
+    river_polygon = Polygon(river_coords, closed=True, color='royalblue', alpha=0.8, linewidth=0)
+    ax.add_patch(river_polygon)
+    land_width = 1.2 * np.max(b)
+    ax.fill_between(x / 1000, river_right, land_width, color='darkgreen', alpha=0.7, linewidth=0)
+    ax.fill_between(x / 1000, -land_width, river_left, color='darkgreen', alpha=0.7, linewidth=0)
+    ax.set_xlabel("Distance (km)")
+    ax.set_ylabel("Largeur relative (m)")
+    ax.set_title("Forme de la rivière (vue en plan)")
+    ax.set_ylim(-land_width, land_width)
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
 
-# plt.tight_layout()  # Interpolation de u aux points entiers
-# plt.show()
+if show_bathymetry :
+    fig, ax = plt.subplots(figsize=(12, 4))
+    ax.plot(x / 1000, np.zeros_like(x), color='deepskyblue', lw=2, label="Surface de l'eau (z=0)")
+    ax.plot(x / 1000, zb, color='saddlebrown', lw=2, label="Lit de la rivière")
+    ax.fill_between(x / 1000, zb, 0, where=zb < 0, color='deepskyblue', alpha=0.7)
+    ax.fill_between(x / 1000, zb, np.min(zb)-1, color='saddlebrown', alpha=0.6)
+    ax.set_xlabel("Distance (km)")
+    ax.set_ylabel("Altitude (m)")
+    ax.set_title("Bathymétrie de la rivière (surface et profondeur)")
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.show()
 
 @njit(fastmath=True, cache=True)
 def compute_tidal_bore(nframes, nx, dx, dt, g, rho, b, zb, h_estuary, tide_amplitude, tide_period, n_manning=0.001):
@@ -50,7 +79,7 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, rho, b, zb, h_estuary, tide_ampli
     u = np.zeros(nx+1) #demi indice
     q = np.zeros(nx)
 
-    h[:] = h_estuary
+    h[:] = -zb
     u[:] = 0.0
     q[:] = 0.0
     
@@ -63,22 +92,26 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, rho, b, zb, h_estuary, tide_ampli
     for frame in range(nframes):
 
         h[0] = h_estuary + tide_amplitude * np.sin(2 * np.pi * t / tide_period)
-        u[0] = np.sqrt(g * h[0])
-        h[1] = h[0]
-        h[-1] = 2 * h[-2] - h[-3]
-        u[-1] = u[-2]
+        c_in = np.sqrt(g * h[0])
+        c1 = np.sqrt(g * h[1])
+        u[0] = u[1] + 2 * (c_in - c1)
         
-        for j in range(1, nx):
+        
+        for j in range(1, nx-1):
             h_phalf = 0.5 * (h[j] + h[j+1])
             h_mhalf = 0.5 * (h[j] + h[j-1])
             b_phalf = 0.5 * (b[j] + b[j+1])
             b_mhalf = 0.5 * (b[j] + b[j-1])
             h[j] = h[j] - dt/dx * ((h_phalf * u[j])/b_phalf * (b_phalf - b_mhalf) + (h_phalf*u[j] - h_mhalf*u[j-1]))
 
-        for j in range(1, nx):
+        for j in range(1, nx-1):
+
             u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j]) + (u[j] - u[j-1]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / h[j]**(4/3)
-        
-        all_eta[frame, :] = h - h_estuary
+
+        h[-1] = 2 * h[-2] - h[-3]
+        u[-2] = 2 * u[-3] - u[-4]
+        u[-1] = 2 * u[-2] - u[-3]
+        all_eta[frame, :] = h + zb
         all_u[frame, :] = u[:]
         all_time[frame] = t
         t += dt
@@ -95,32 +128,45 @@ all_eta, all_u, all_time = compute_tidal_bore(nframes, nx, dx, dt, g, 1000, b, z
 print (f"Temps de calcul : {time.time() - start:.2f} secondes")
 
 all_u = all_u[:, :-1]
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-ax1.set_xlim(0, L / 1000)
-ax1.set_ylim(np.min(zb), np.max(all_eta) + h_estuary)
-ax1.set_xlabel("Distance (km)")
-ax1.set_ylabel("Elevation (m)")
-ax1.axhline(y=-h_estuary, color='k', linestyle='--', label='Fond de la mer')
-ax1.grid(True, alpha=0.3)
+fig, ax = plt.subplots(figsize=(14, 8))
 
-ax2.set_xlim(0, L / 1000)
-ax2.set_ylim(np.min(all_u), np.max(all_u))
-ax2.set_xlabel("Distance (km)")
-ax2.set_ylabel("Vitesse (m/s)")
-ax2.grid(True, alpha=0.3)
+ax.set_xlim(0, L / 1000)
+ax.set_ylim(np.min(zb) - 2, tide_amplitude * 2 )
+ax.set_xlabel("Distance de l'estuaire vers Podensac (km)", fontsize=12, labelpad=10)
+ax.set_ylabel("Élévation (m)", fontsize=12, labelpad=10)
+ax.set_title(f"Propagation du mascaret - Temps: 0 min", fontsize=14, pad=20)
+ax.grid(True, alpha=0.2)
+
+ax.text(0.02, 0.8, "Estuaire de la Gironde\n (marée montante)", transform=ax.transAxes, 
+        fontsize=12, fontweight='bold', color='navy')
+ax.text(0.85, 0.8, "Podensac", transform=ax.transAxes, 
+        fontsize=12, fontweight='bold', color='navy')
+
+ax.axhline(y=-h_estuary, color='k', linestyle='--', linewidth=1, label='Fond marin')
+ax.fill_between(x/1000, np.min(zb)-2, zb, color='saddlebrown', alpha=0.7, label='Lit de la rivière')
+water_surface, = ax.plot(x/1000, all_eta[0, :], color='deepskyblue', lw=2, label="Surface de l'eau")
 
 def update(frame):
-    line_water.set_ydata(all_eta[frame, :])
-    line_velocity.set_ydata(all_u[frame, :])
-    ax1.set_title(f"Mascaret dans la Garonne - t = {all_time[frame] / 60:.2f} min")
-    return line_water, line_velocity
+    water_polygon.set_xy(np.vstack([
+        np.concatenate([x/1000, x[::-1]/1000]),
+        np.concatenate([all_eta[frame, :], zb[::-1]])
+    ]).T)
+    water_surface.set_ydata(all_eta[frame, :])
+    time = int(all_time[frame] // 60)
+    ax.set_title(f"Propagation du mascaret - Temps: {time} min", fontsize=14, pad=20)
+    return water_polygon
 
-line_water, = ax1.plot(x / 1000, all_eta[0, :], 'b-', lw=2, label="Surface")
-line_velocity, = ax2.plot(x / 1000, all_u[0, :], 'r-', lw=2, label="Vitesse")
-ax1.legend()
-ax2.legend()
+water_polygon = Polygon(np.vstack([np.concatenate([x/1000, x[::-1]/1000]),
+                                 np.concatenate([all_eta[0, :], zb[::-1]])]).T,
+                      color='dodgerblue', alpha=0.7, label='Eau')
+ax.add_patch(water_polygon)
 
-step = 20
-anim = FuncAnimation(fig, update, frames=range(0, int(tmax / dt), step), interval=50, blit=False)
+ax.legend(loc='upper right', framealpha=1)
+
 plt.tight_layout()
+
+interval = 30
+step = max(1, nframes // (20 * 1000 // interval))
+
+anim = FuncAnimation( fig, update,frames=range(0, nframes, step),interval=interval,blit=False)
 plt.show()
