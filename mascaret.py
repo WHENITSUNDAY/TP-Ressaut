@@ -11,7 +11,7 @@ Le schéma se base en partie sur cela d'article "Numerical Simulation of Tidal B
 
 show_river = True          #True si on veut afficher la forme de la rivière en largeur
 show_bathymetry = True     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
-
+bathymetry_shape = 4 #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste), 4 pour quadratique avec une bosse (voire plusieurs)
 L = 8e4             #Longueur caractéristique de l'écoulement
 h_estuary = 6       #Profondeur en aval (gauche)
 h_river = 3         #Profondeur en amont (droite) -> Utilisée seulement si profondeur non constante
@@ -37,10 +37,23 @@ tmax = 1.2 * L / c
 
 
 #Création du profil de profondeur de la rivière : 
-zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
-#zb = np.full(nx, -h_estuary)
-#zb[int(nx/2):int(nx/2) + 20] += 4
-#zb = -h_estuary + 2 * np.exp(-(x - L/2)**2 / (2 * (5000 / 4)**2))
+if bathymetry_shape == 1: #Constant
+    h_static = h_estuary
+    zb = np.full(nx, -h_static)
+
+elif bathymetry_shape == 2: #Linéaire (pour les élèves)
+
+    zb = 0 #à modifier
+
+elif bathymetry_shape == 3: #Quadratique
+    zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
+
+elif bathymetry_shape == 4:
+    zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
+    bump_height = 2
+    bump_width = 5e3
+    bump_center = L/2
+    zb = zb + bump_height * np.exp(-(x - bump_center)**2 / (2 * (bump_width / 4)**2))
 
 #Création du profil de largeur de la rivière :
 b = b_river + (b_estuary - b_river) * np.exp(-8 * x / L)
@@ -112,10 +125,9 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, b, zb, h_estuary, tide_amplitude,
             b_phalf = 0.5 * (b[j] + b[j+1])
             b_mhalf = 0.5 * (b[j] + b[j-1])
             h[j] = h[j] - dt/dx * ((h_phalf * u[j])/b_phalf * (b_phalf - b_mhalf) + (h_phalf*u[j] - h_mhalf*u[j-1]))
-
-        for j in range(1, nx-1):
             if h[j] + zb[j] != 0 :
                 u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / h[j]**(4/3)
+
 
         h[-1] = 2 * h[-2] - h[-3]
         u[-2] = 2 * u[-3] - u[-4]
