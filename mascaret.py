@@ -4,25 +4,23 @@ from matplotlib.animation import FuncAnimation
 from numba import njit
 import time
 from matplotlib.patches import Polygon
-from matplotlib.widgets import Button, Slider
-from matplotlib import rcParams
 """Le but de code est de simuler numériquement le phénomène de Mascaret se produisant dans une rivière. Plus particulièrement, on considérera une forme en entonnoir 
 pour la rivière, avec une pente quadratique. Cela permettra d'accentuer le ressaut etde mettre en avant le phénomène ondulatoire du Mascaret. 
 Le schéma se base en partie sur cela d'article "Numerical Simulation of Tidal Bore Bono at Kampar River (JAFM, A. C. Bayu et al)"""
 
-show_velocity = True      #True si on veut afficher le profil de la vitesse pendant la simulation
-show_river = True          #True si on veut afficher la forme de la rivière en largeur
-show_bathymetry = True     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
+show_velocity = False      #True si on veut afficher le profil de la vitesse pendant la simulation
+show_river = False          #True si on veut afficher la forme de la rivière en largeur
+show_bathymetry = False     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
 bathymetry_shape = 3       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
 obstacle_shape = 3         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
 
 L = 80000             #Longueur caractéristique de l'écoulement
-h_estuary = 8       #Profondeur en aval (gauche)
+h_estuary = 6       #Profondeur en aval (gauche)
 h_river = 3         #Profondeur en amont (droite) -> Utilisée seulement si profondeur non constante
 b_river = 200       #Larguer de la rivière en amont
-b_estuary = 5000   #Largeur de la rivière en aval (estuaire)
+b_estuary = 13000   #Largeur de la rivière en aval (estuaire)
 
-tide_amplitude = 3                  #Amplitude de la marée
+tide_amplitude = 2                  #Amplitude de la marée
 tide_period = 12 * 3600 + 25 * 60   #Période de l'onde de marée -> 12h25m
 
 n_manning = 0.001       #Coefficient de frottement de manning
@@ -51,7 +49,7 @@ elif bathymetry_shape == 3: #Quadratique
 
     
 if obstacle_shape == 1:
-    slot_height = 3
+    slot_height = 7
     slot_width = 5000
     slot_center = L/2
     start_idx = int((slot_center - slot_width/2) / L * nx)
@@ -61,7 +59,7 @@ if obstacle_shape == 1:
 elif obstacle_shape == 2:
     ramp_width = 10000
     ramp_x0 = L/2
-    ramp_height = 2
+    ramp_height = 5
     start_idx = int((ramp_x0) / L * nx)
     end_idx = int((ramp_x0 + ramp_width) / L * nx)
 
@@ -70,7 +68,7 @@ elif obstacle_shape == 2:
         zb[i] += ramp_height * (i - start_idx) / (end_idx - start_idx)
 
 elif obstacle_shape == 3:
-    bump_height = 1
+    bump_height = 5
     bump_width = 20000
     bump_center = L/2
     zb = zb + bump_height * np.exp(-(x - bump_center)**2 / (2 * (bump_width / 4)**2))
@@ -124,27 +122,39 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, b, zb, h_estuary, tide_amplitude,
     u[:] = 0.0
     q[:] = 0.0
     
+    h[:] = np.maximum(0, h[:])
     all_eta = np.zeros((nframes, nx))
     all_u = np.zeros((nframes, nx+1))
     all_time = np.zeros(nframes)
     
     t = 0.0
-
+    eps = 1e-4
     for frame in range(nframes):
 
         h[0] = h_estuary + tide_amplitude * np.sin(2 * np.pi * t / tide_period)
-        c_in = np.sqrt(g * h[0])
-        c1 = np.sqrt(g * h[1])
-        u[0] = u[1] + 2 * (c_in - c1)
-        
+        u[0] = u[1] + (h[0] - h[1]) * np.sqrt(g / h[0]) 
+
         for j in range(1, nx-1):
-            h_phalf = 0.5 * (h[j] + h[j+1])
-            h_mhalf = 0.5 * (h[j] + h[j-1])
+            h_phalf = 0.5 * (h[j] + h[j+1]) if h[j+1] > 0 else 0 
+            h_mhalf = 0.5 * (h[j] + h[j-1]) if h[j-1] > 0 else 0 
             b_phalf = 0.5 * (b[j] + b[j+1])
             b_mhalf = 0.5 * (b[j] + b[j-1])
             h[j] = h[j] - dt/dx * ((h_phalf * u[j])/b_phalf * (b_phalf - b_mhalf) + (h_phalf*u[j] - h_mhalf*u[j-1]))
-            if h[j] + zb[j] != 0 :
-                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / h[j]**(4/3)
+
+            if h[j] <= 0:
+                h[j] = 0
+
+        for j in range(1, nx-1):
+
+            if zb[j] >= h[j] +zb[j]:
+                h[j] = 0
+                u[j] = 0
+                continue
+
+            if u[j] >= 0: 
+                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
+            elif u[j] < 0:
+                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j+1] - u[j]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
 
 
         h[-1] = 2 * h[-2] - h[-3]
