@@ -4,12 +4,13 @@ from matplotlib.animation import FuncAnimation
 from numba import njit
 import time
 from matplotlib.patches import Polygon
-
+from matplotlib.widgets import Button, Slider
+from matplotlib import rcParams
 """Le but de code est de simuler numériquement le phénomène de Mascaret se produisant dans une rivière. Plus particulièrement, on considérera une forme en entonnoir 
 pour la rivière, avec une pente quadratique. Cela permettra d'accentuer le ressaut etde mettre en avant le phénomène ondulatoire du Mascaret. 
 Le schéma se base en partie sur cela d'article "Numerical Simulation of Tidal Bore Bono at Kampar River (JAFM, A. C. Bayu et al)"""
 
-show_velocity = False      #True si on veut afficher le profil de la vitesse pendant la simulation
+show_velocity = True      #True si on veut afficher le profil de la vitesse pendant la simulation
 show_river = True          #True si on veut afficher la forme de la rivière en largeur
 show_bathymetry = True     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
 bathymetry_shape = 3       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
@@ -21,7 +22,7 @@ h_river = 3         #Profondeur en amont (droite) -> Utilisée seulement si prof
 b_river = 200       #Larguer de la rivière en amont
 b_estuary = 5000   #Largeur de la rivière en aval (estuaire)
 
-tide_amplitude = 2                  #Amplitude de la marée
+tide_amplitude = 3                  #Amplitude de la marée
 tide_period = 12 * 3600 + 25 * 60   #Période de l'onde de marée -> 12h25m
 
 n_manning = 0.001       #Coefficient de frottement de manning
@@ -191,28 +192,42 @@ if show_velocity:
     stride = max(1, nx // 50)
     x_quiver = x[::stride] / 1000
     eta_mid = (all_eta[0, ::stride] + zb[::stride]) / 2
-    quiver = ax.quiver(x_quiver, eta_mid, all_u[0, ::stride], np.zeros_like(x_quiver), scale=100, color='red', width=0.003)
+    quiver = ax.quiver(x_quiver, eta_mid, all_u[0, ::stride], np.zeros_like(x_quiver), scale=150, color='royalblue', width=0.003)
+
+
+water_polygon = Polygon(np.vstack([np.concatenate([x/1000, x[::-1]/1000]),np.concatenate([all_eta[0, :], zb[::-1]])]).T,color='dodgerblue', alpha=0.7, label='Eau')
+ax.add_patch(water_polygon)
+ax.legend(loc='upper left', framealpha=1)
+
+paused = False
+
+def on_press(event):
+    global paused
+    if event.key == ' ':
+        paused = not paused
+        if paused:
+            anim.event_source.stop()
+        else:
+            anim.event_source.start()
 
 def update(frame):
-    water_polygon.set_xy(np.vstack([np.concatenate([x/1000, x[::-1]/1000]), np.concatenate([all_eta[frame, :], zb[::-1]])]).T)
+    water_polygon.set_xy(np.vstack([np.concatenate([x/1000, x[::-1]/1000]), 
+                                  np.concatenate([all_eta[frame, :], zb[::-1]])]).T)
     water_surface.set_ydata(all_eta[frame, :])
     
     if show_velocity:
         eta_mid = (all_eta[frame, ::stride] + zb[::stride]) / 2
         quiver.set_offsets(np.column_stack([x_quiver, eta_mid]))
         quiver.set_UVC(all_u[frame, ::stride], np.zeros_like(x_quiver))
-    ax.set_title(f"Propagation du mascaret - Temps: {int(all_time[frame] // 60)} min", fontsize=14)
-
-    return water_polygon
-
-water_polygon = Polygon(np.vstack([np.concatenate([x/1000, x[::-1]/1000]),np.concatenate([all_eta[0, :], zb[::-1]])]).T,color='dodgerblue', alpha=0.7, label='Eau')
-ax.add_patch(water_polygon)
-ax.legend(loc='upper left', framealpha=1)
-plt.tight_layout()
+    
+    ax.set_title(f"Propagation du mascaret - Temps: {int(all_time[frame] // 60)} min")
+    return water_polygon, water_surface
 
 interval = 30
 step = max(1, nframes // (30 * 1000 // interval))
 
-anim = FuncAnimation( fig, update,frames=range(0, nframes, step),interval=interval,blit=False)
+fig.canvas.mpl_connect('key_press_event', on_press)
+anim = FuncAnimation(fig, update, frames=range(0, nframes, step), interval=interval, blit=False, repeat=True)
 
+plt.tight_layout()
 plt.show()
