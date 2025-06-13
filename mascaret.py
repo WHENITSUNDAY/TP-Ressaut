@@ -12,7 +12,7 @@ show_velocity = False      #True si on veut afficher le profil de la vitesse pen
 show_river = False          #True si on veut afficher la forme de la rivière en largeur
 show_bathymetry = False     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
 bathymetry_shape = 3       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
-obstacle_shape = 3         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
+obstacle_shape = 1         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
 
 L = 80000             #Longueur caractéristique de l'écoulement
 h_estuary = 6       #Profondeur en aval (gauche)
@@ -23,7 +23,7 @@ b_estuary = 13000   #Largeur de la rivière en aval (estuaire)
 tide_amplitude = 2                  #Amplitude de la marée
 tide_period = 12 * 3600 + 25 * 60   #Période de l'onde de marée -> 12h25m
 
-n_manning = 0.001       #Coefficient de frottement de manning
+
 
 nx = 1024
 dx = L / nx
@@ -32,6 +32,7 @@ g = 9.81
 cfl = 0.1
 dt = cfl * dx / (np.sqrt(g * h_estuary + tide_amplitude))
 c = np.sqrt(g * h_estuary)   # vitesse d'onde (approximation mascaret)
+n_manning = 0.001       #Coefficient de frottement de manning
 tmax = 1.2 * L / c  
 
 
@@ -49,7 +50,7 @@ elif bathymetry_shape == 3: #Quadratique
 
     
 if obstacle_shape == 1:
-    slot_height = 7
+    slot_height = 3
     slot_width = 5000
     slot_center = L/2
     start_idx = int((slot_center - slot_width/2) / L * nx)
@@ -59,7 +60,7 @@ if obstacle_shape == 1:
 elif obstacle_shape == 2:
     ramp_width = 10000
     ramp_x0 = L/2
-    ramp_height = 5
+    ramp_height = 3
     start_idx = int((ramp_x0) / L * nx)
     end_idx = int((ramp_x0 + ramp_width) / L * nx)
 
@@ -72,6 +73,7 @@ elif obstacle_shape == 3:
     bump_width = 20000
     bump_center = L/2
     zb = zb + bump_height * np.exp(-(x - bump_center)**2 / (2 * (bump_width / 4)**2))
+
 
 #Création du profil de largeur de la rivière :
 b = b_river + (b_estuary - b_river) * np.exp(-8 * x / L)
@@ -157,9 +159,8 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, b, zb, h_estuary, tide_amplitude,
                 u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j+1] - u[j]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
 
 
-        h[-1] = 2 * h[-2] - h[-3]
-        u[-2] = 2 * u[-3] - u[-4]
-        u[-1] = 2 * u[-2] - u[-3]
+        h[-1] = h_river
+        u[-1] = 0
         all_eta[frame, :] = h + zb
         all_u[frame, :] = u[:]
         all_time[frame] = t
