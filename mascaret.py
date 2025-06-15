@@ -5,27 +5,27 @@ from numba import njit
 import time
 from matplotlib.patches import Polygon
 """Le but de code est de simuler numériquement le phénomène de Mascaret se produisant dans une rivière. Plus particulièrement, on considérera une forme en entonnoir 
-pour la rivière, avec une pente quadratique. Cela permettra d'accentuer le ressaut etde mettre en avant le phénomène ondulatoire du Mascaret. 
-Le schéma se base en partie sur cela d'article "Numerical Simulation of Tidal Bore Bono at Kampar River (JAFM, A. C. Bayu et al)"""
+pour la rivière, avec une pente quadratique. Cela permettra d'accentuer le ressaut et de mettre en avant le phénomène ondulatoire du Mascaret. 
+Le schéma numérique se base en partie sur celui d'article "Numerical Simulation of Tidal Bore Bono at Kampar River (JAFM, A. C. Bayu et al)"""
 
 show_velocity = False      #True si on veut afficher le profil de la vitesse pendant la simulation
 show_river = False          #True si on veut afficher la forme de la rivière en largeur
 show_bathymetry = False     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
-bathymetry_shape = 3       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
-obstacle_shape = 0         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
+bathymetry_shape = 1       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
+obstacle_shape = 1         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
 
-L = 80000             #Longueur caractéristique de l'écoulement
-h_estuary = 6       #Profondeur en aval (gauche)
-h_river = 3         #Profondeur en amont (droite) -> Utilisée seulement si profondeur non constante
-b_river = 200       #Larguer de la rivière en amont
-b_estuary = 13000   #Largeur de la rivière en aval (estuaire)
+L = 0             #Longueur caractéristique du fleuve (m)
+h_estuary = 0       #Profondeur en aval (gauche) (m)
+h_river = 0         #Profondeur en amont (droite) (m)
+b_river = 0       #Largeur de la rivière en amont (m)
+b_estuary = 0   #Largeur de la rivière en aval (estuaire) (m)
 
-tide_amplitude = 2                  #Amplitude de la marée
-tide_period = 12 * 3600 + 25 * 60   #Période de l'onde de marée -> 12h25m
+tide_amplitude = 0                  #Amplitude de la marée (m)
+tide_period = 0   #Période de l'onde de marée (s)
 
 
 
-nx = 1024
+nx = 512
 dx = L / nx
 x = np.linspace(0, L, nx)
 g = 9.81
@@ -40,13 +40,12 @@ tmax = 1.2 * L / c
 #Création du profil de profondeur de la rivière : 
 if bathymetry_shape == 1: #Constant
     h_static = h_estuary
-    zb = np.full(nx, -h_static)
+    zb = np.full(nx, 0)
 
-elif bathymetry_shape == 2: #Linéaire (pour les élèves)
-    zb = 0
-
+elif bathymetry_shape == 2: #Linéaire
+    zb = 0 + 0 * x
 elif bathymetry_shape == 3: #Quadratique
-    zb = -h_estuary + (h_estuary - h_river) * (x / L)**2
+    zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
 
     
 if obstacle_shape == 1:
