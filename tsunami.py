@@ -4,21 +4,24 @@ from matplotlib.animation import FuncAnimation
 from numba import njit
 import time
 from matplotlib.patches import Polygon
-"""Le but de code est de simuler numériquement le phénomène de Mascaret se produisant dans une rivière. Plus particulièrement, on considérera une forme en entonnoir 
-pour la rivière, avec une pente quadratique. Cela permettra d'accentuer le ressaut etde mettre en avant le phénomène ondulatoire du Mascaret. 
-Le schéma se base en partie sur cela d'article "Numerical Simulation of Tidal Bore Bono at Kampar River (JAFM, A. C. Bayu et al)"""
+"""Le but de code est de simuler numériquement le phénomène de Tsunami, pour cela on utilise les équations de St Venant avec frottement.
+La simulation en elle même s'inspire du scénario du séisme de Tohoku de 2011"""
 
 show_velocity = False      #True si on veut afficher le profil de la vitesse pendant la simulation
-show_bathymetry = False     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
-obstacle_shape = 0         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
-
+show_bathymetry = True     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
+protection_type = 0        #1 pour une protection type "mangrove, 0 sinon"
 L = 60000             #Longueur caractéristique de l'écoulement
-h_ocean = 1000       #Profondeur en aval (gauche)
+h_ocean = 2000       #Profondeur en aval (gauche)
 
+magnitude = 8 #Magnitude du séisme !
 quake_center = 0
-quake_amplitude = 10
+quake_amplitude = 10**(0.4 * (magnitude - 6)) #Relation empirique (approximation)
+print(quake_amplitude)
 quake_width = 2000
 
+n_manning_ocean = 0.007       #Coefficient de frottement de manning
+n_manning_coast = 0.02
+n_manning_mangrove = 1.0
 
 nx = 2048
 dx = L / nx
@@ -26,38 +29,23 @@ x = np.linspace(0, L, nx)
 g = 9.81
 cfl = 0.1
 dt = cfl * dx / (np.sqrt(g * h_ocean + quake_amplitude))
-c = np.sqrt(g * h_ocean)   # vitesse d'onde (approximation mascaret)
-n_manning = 0.05       #Coefficient de frottement de manning
-tmax = 2.5 * L / c  
+c = np.sqrt(g * h_ocean)   # vitesse d'onde approximative
+tmax = 1.5 * L / c  
+
+n_manning = np.full(nx, n_manning_ocean)
 
 zb = -h_ocean * (1 - (np.arange(nx)/(nx-1))**2)
 
+h_transition = -200 #A partir de quelle profondeur on veut que le littoral commence
+transition_idx = np.argmin(np.abs(zb - h_transition))
+zb[transition_idx:] = h_transition - h_transition / (L - x[transition_idx]) * (x[transition_idx:] - x[transition_idx])
 
-    
-if obstacle_shape == 1:
-    slot_height = 3
-    slot_width = 5000
-    slot_center = L/2
-    start_idx = int((slot_center - slot_width/2) / L * nx)
-    end_idx = int((slot_center + slot_width/2) / L * nx)
-    zb[start_idx:end_idx] += slot_height  
+if protection_type == 0:
+    n_manning[transition_idx:] = n_manning_coast
 
-elif obstacle_shape == 2:
-    ramp_width = 10000
-    ramp_x0 = L/2
-    ramp_height = 3
-    start_idx = int((ramp_x0) / L * nx)
-    end_idx = int((ramp_x0 + ramp_width) / L * nx)
+elif protection_type == 1:
+    n_manning[transition_idx:] = n_manning_mangrove
 
-    for i in range(start_idx, end_idx):
-
-        zb[i] += ramp_height * (i - start_idx) / (end_idx - start_idx)
-
-elif obstacle_shape == 3:
-    bump_height = 5
-    bump_width = 20000
-    bump_center = L/2
-    zb = zb + bump_height * np.exp(-(x - bump_center)**2 / (2 * (bump_width / 4)**2))
 
 if show_bathymetry :
     fig, ax = plt.subplots(figsize=(12, 4))
@@ -70,7 +58,17 @@ if show_bathymetry :
     ax.set_xlabel("Distance (km)")
     ax.set_ylabel("Altitude (m)")
     ax.set_title("Bathymétrie de l'océan")
-    
+    transition_x = x[transition_idx] / 1000
+
+    if protection_type == 0:
+        ax.fill_between(x/1000, np.min(zb)-2, zb, where=(x >= x[transition_idx]), color='peru', alpha=0.4)
+        ax.axvline(transition_x, color='darkorange', linestyle='--', lw=1.5, label=f'Littoral')
+        ax.text(transition_x + 0.5, np.min(zb) + 5, "Littoral", ha='left', va='bottom', color='darkorange', fontsize=10, bbox=dict(facecolor='white', alpha=0.8))
+
+    if protection_type == 1:
+        ax.fill_between(x/1000, np.min(zb)-2, zb, where=(x >= x[transition_idx]), color='forestgreen', alpha=0.2)
+        ax.axvline(transition_x, color='forestgreen', linestyle='--', lw=1.5, label=f'Littoral (mangrove)')
+        ax.text(transition_x + 0.5, np.min(zb) + 5, "Littoral (mangrove)", ha='left', va='bottom', color='forestgreen', fontsize=10, bbox=dict(facecolor='white', alpha=0.8))
     ax.legend()
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
@@ -93,7 +91,7 @@ def compute_tsunami(nframes, nx, dx, dt, g, zb, quake_center, quake_width, quake
     all_time = np.zeros(nframes)
 
     t = 0.0
-    eps = 1e-4
+    eps = 1e-6
     for frame in range(nframes):
 
         c = np.sqrt(g * max(h[0], eps))
@@ -116,9 +114,9 @@ def compute_tsunami(nframes, nx, dx, dt, g, zb, quake_center, quake_width, quake
                 continue
 
             if u[j] >= 0: 
-                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
+                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning[j]**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
             elif u[j] < 0:
-                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j+1] - u[j]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
+                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j+1] - u[j]))- dt * g * n_manning[j]**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
 
 
         h[-1] = 0
@@ -149,12 +147,24 @@ all_time = all_time[start_frame:]
 fig, ax = plt.subplots(figsize=(14, 8))
 ax.set_yscale('symlog', linthresh=20, linscale=1)
 ax.set_xlim(0, L / 1000)
-ax.set_ylim(np.min(zb) - 2, quake_amplitude * 2 )
+ax.set_ylim(np.min(zb) - 2, 30)
 ax.set_xlabel("Distance du séisme jusqu'à la côte (km)", fontsize=12, labelpad=10)
 ax.set_ylabel("Élévation (m)", fontsize=12, labelpad=10)
 ax.set_title(f"Propagation du tsunami - Temps: 0 min", fontsize=14, pad=20)
 ax.grid(True, alpha=0.2)
 ax.text(0.02, 0.55, "Séisme de grande magnitude", transform=ax.transAxes, fontsize=12, fontweight='bold', color='navy')
+transition_x = x[transition_idx] / 1000
+
+if protection_type == 0:
+    ax.fill_between(x/1000, np.min(zb)-2, zb, where=(x >= x[transition_idx]), color='peru', alpha=0.4)
+    ax.axvline(transition_x, color='darkorange', linestyle='--', lw=1.5, label=f'Littoral')
+    ax.text(transition_x + 0.5, np.min(zb) + 5, "Littoral", ha='left', va='bottom', color='darkorange', fontsize=10, bbox=dict(facecolor='white', alpha=0.8))
+
+if protection_type == 1:
+    ax.fill_between(x/1000, np.min(zb)-2, zb, where=(x >= x[transition_idx]), color='forestgreen', alpha=0.2)
+    ax.axvline(transition_x, color='forestgreen', linestyle='--', lw=1.5, label=f'Littoral (mangrove)')
+    ax.text(transition_x + 0.5, np.min(zb) + 5, "Littoral (mangrove)", ha='left', va='bottom', color='forestgreen', fontsize=10, bbox=dict(facecolor='white', alpha=0.8))
+
 ax.plot(x / 1000, zb, color='saddlebrown', lw=2, label="Fond océanique")
 ax.fill_between(x/1000, np.min(zb)-2, zb, color='saddlebrown', alpha=0.6)
 
@@ -169,7 +179,7 @@ if show_velocity:
 
 water_polygon = Polygon(np.vstack([np.concatenate([x/1000, x[::-1]/1000]),np.concatenate([all_eta[0, :], zb[::-1]])]).T,color='dodgerblue', alpha=0.7, label='Eau')
 ax.add_patch(water_polygon)
-ax.legend(loc='upper left', framealpha=1)
+ax.legend(loc='lower left', framealpha=1)
 
 paused = False
 

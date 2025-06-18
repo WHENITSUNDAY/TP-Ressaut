@@ -11,50 +11,55 @@ Le schéma numérique se base en partie sur celui d'article "Numerical Simulatio
 show_velocity = False      #True si on veut afficher le profil de la vitesse pendant la simulation
 show_river = False          #True si on veut afficher la forme de la rivière en largeur
 show_bathymetry = False     #True si on veut afficher la bathymétrie (profil de la profondeur) de la rivière
-bathymetry_shape = 1       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
-obstacle_shape = 1         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
+bathymetry_shape = 2       #1 pour constant, 2 pour linéaire, 3 pour quadratique (le plus réaliste)
+obstacle_shape = 0         #1 pour un créneau, 2 pour une rampe, 3 pour une bosse (gausienne)
 
-L = 0             #Longueur caractéristique du fleuve (m)
-h_estuary = 0       #Profondeur en aval (gauche) (m)
-h_river = 0         #Profondeur en amont (droite) (m)
-b_river = 0       #Largeur de la rivière en amont (m)
-b_estuary = 0   #Largeur de la rivière en aval (estuaire) (m)
+L = 100000             #Longueur caractéristique du fleuve (m)
+h_estuary = 6       #Profondeur en aval (gauche) (m)
+h_river = 4         #Profondeur en amont (droite) (m)
+b_river = 200       #Largeur de la rivière en amont (m)
+b_estuary = 10000   #Largeur de la rivière en aval (estuaire) (m)
 
-tide_amplitude = 0                  #Amplitude de la marée (m)
-tide_period = 0   #Période de l'onde de marée (s)
+tide_amplitude = 6                 #Amplitude de la marée (marnage) (m)
+tide_period = 44700   #Période de l'onde de marée (s)
 
-
-
-nx = 512
+n_manning_river = 0.015       #Coefficient de frottement de manning
+n_manning_obstacle = 0.040
+nx = 1024
 dx = L / nx
 x = np.linspace(0, L, nx)
 g = 9.81
 cfl = 0.1
 dt = cfl * dx / (np.sqrt(g * h_estuary + tide_amplitude))
 c = np.sqrt(g * h_estuary)   # vitesse d'onde (approximation mascaret)
-n_manning = 0.001       #Coefficient de frottement de manning
 tmax = 1.2 * L / c  
 
-
+n_manning = np.full(nx, n_manning_river)
 
 #Création du profil de profondeur de la rivière : 
 if bathymetry_shape == 1: #Constant
     h_static = h_estuary
-    zb = np.full(nx, 0)
+    zb = np.full(nx, -h_static)
+    h_river = h_static
 
 elif bathymetry_shape == 2: #Linéaire
-    zb = 0 + 0 * x
+    a = 0
+    b = 0
+    zb = a * x + b
+    zb = np.linspace(-h_estuary, -h_river, nx)
+
 elif bathymetry_shape == 3: #Quadratique
     zb = -h_river + (h_river - h_estuary) * (1 - x / L)**2
 
     
 if obstacle_shape == 1:
     slot_height = 3
-    slot_width = 5000
-    slot_center = L/2
+    slot_width = L/2
+    slot_center = 3*L/4
     start_idx = int((slot_center - slot_width/2) / L * nx)
     end_idx = int((slot_center + slot_width/2) / L * nx)
     zb[start_idx:end_idx] += slot_height  
+    n_manning[start_idx:end_idx] = n_manning_obstacle
 
 elif obstacle_shape == 2:
     ramp_width = 10000
@@ -62,7 +67,7 @@ elif obstacle_shape == 2:
     ramp_height = 3
     start_idx = int((ramp_x0) / L * nx)
     end_idx = int((ramp_x0 + ramp_width) / L * nx)
-
+    n_manning[start_idx:end_idx] = n_manning_obstacle
     for i in range(start_idx, end_idx):
 
         zb[i] += ramp_height * (i - start_idx) / (end_idx - start_idx)
@@ -71,8 +76,10 @@ elif obstacle_shape == 3:
     bump_height = 5
     bump_width = 20000
     bump_center = L/2
+    start_idx = int((bump_center - bump_width/2) / L * nx)
+    end_idx = int((bump_center + bump_width/2) / L * nx)
     zb = zb + bump_height * np.exp(-(x - bump_center)**2 / (2 * (bump_width / 4)**2))
-
+    n_manning[start_idx:end_idx] = n_manning_obstacle
 
 #Création du profil de largeur de la rivière :
 b = b_river + (b_estuary - b_river) * np.exp(-8 * x / L)
@@ -98,7 +105,7 @@ if show_river :
 
 if show_bathymetry :
     fig, ax = plt.subplots(figsize=(12, 4))
-    ax.set_ylim(-h_estuary - 2, 0)
+    ax.set_ylim(min(zb)- 2, max(zb))
     ax.set_xlim(0, L/1000)
     ax.plot(x / 1000, np.zeros_like(x), color='deepskyblue', lw=2, label="Surface de l'eau (z=0)")
     ax.plot(x / 1000, zb, color='saddlebrown', lw=2, label="Lit de la rivière")
@@ -132,7 +139,7 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, b, zb, h_estuary, tide_amplitude,
     eps = 1e-4
     for frame in range(nframes):
 
-        h[0] = h_estuary + tide_amplitude * np.sin(2 * np.pi * t / tide_period)
+        h[0] = h_estuary + tide_amplitude/2 * np.sin(2 * np.pi * t / tide_period)
         u[0] = u[1] + (h[0] - h[1]) * np.sqrt(g / h[0]) 
 
         for j in range(1, nx-1):
@@ -153,12 +160,12 @@ def compute_tidal_bore(nframes, nx, dx, dt, g, b, zb, h_estuary, tide_amplitude,
                 continue
 
             if u[j] >= 0: 
-                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
+                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j] - u[j-1]))- dt * g * n_manning[j]**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
             elif u[j] < 0:
-                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j+1] - u[j]))- dt * g * n_manning**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
+                u[j] = u[j] - dt/dx * (g*(h[j+1] - h[j] + zb[j+1] - zb[j]) + u[j]*(u[j+1] - u[j]))- dt * g * n_manning[j]**2 * u[j] * abs(u[j]) / (h[j] + eps)**(4/3)
 
 
-        h[-1] = h_river
+        h[-1] = -zb[-1]
         u[-1] = 0
         all_eta[frame, :] = h + zb
         all_u[frame, :] = u[:]
@@ -186,7 +193,7 @@ all_time = all_time[start_frame:]
 fig, ax = plt.subplots(figsize=(14, 8))
 
 ax.set_xlim(0, L / 1000)
-ax.set_ylim(np.min(zb) - 2, tide_amplitude * 2 )
+ax.set_ylim(np.min(zb) - 2, tide_amplitude )
 ax.set_xlabel("Distance de l'estuaire vers Podensac (km)", fontsize=12, labelpad=10)
 ax.set_ylabel("Élévation (m)", fontsize=12, labelpad=10)
 ax.set_title(f"Propagation du mascaret - Temps: 0 min", fontsize=14, pad=20)
@@ -234,7 +241,7 @@ def update(frame):
     return water_polygon, water_surface
 
 interval = 30
-step = max(1, nframes // (30 * 1000 // interval))
+step = max(1, nframes // (20 * 1000 // interval))
 
 fig.canvas.mpl_connect('key_press_event', on_press)
 anim = FuncAnimation(fig, update, frames=range(0, nframes, step), interval=interval, blit=False, repeat=True)
