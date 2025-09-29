@@ -1,3 +1,5 @@
+# Modélisation des ressauts hydrauliques (Mascaret, Tsunami)
+
 Ce projet s'inscrit dans le cadre d'un stage d'encadrement des élèves de secondes en partenariat avec l'ENSEIRB-Matmeca et le CEA, le but étant de leur montrer les différentes filières de l'ingénerie. Dans ce cas, le but est de leur présenter la filière Mathématiques et Mécanique avec une expérience physique, puis une partie simulation numérique (construite ici).
 Le code est donc interactif et les élèves peuvent jouer avec les paramètres afin de simuler différents scénarios.
 
@@ -7,4 +9,8 @@ Le schéma numérique se base en partie sur celui d'article "Numerical Simulatio
 
 La deuxième partie s'inspire de la première avec pour objectif de simuler le phénomène de Tsunami en 1D, on ne tient plus en compte de la largeur pour le schéma car on simule modélise désormais l'océan. Le scénario du tsunami se base en partie sur le séisme de 2011 du Japon.
 
+## Exemples de simulation
+https://github.com/user-attachments/assets/37ecf0f6-535a-4667-a78b-a45dc072887e
+
+https://github.com/user-attachments/assets/8d63731f-c6fc-42f6-9282-4764ffddf396
 
